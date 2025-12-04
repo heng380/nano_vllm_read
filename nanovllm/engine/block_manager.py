@@ -53,7 +53,7 @@ class BlockManager:
         self.used_block_ids.remove(block_id)
         self.free_block_ids.append(block_id)
 
-    def can_allocate(self, seq: Sequence) -> bool:
+    def can_allocate(self, seq: Sequence) -> bool:   # 可能由于cache的存在, 可以allocate
         return len(self.free_block_ids) >= seq.num_blocks
 
     def allocate(self, seq: Sequence):    #只在prefill的时候调用一次, 给输入的sequence一次性分配所有block
@@ -90,10 +90,13 @@ class BlockManager:
         seq.num_cached_tokens = 0
         seq.block_table.clear()
 
-    def can_append(self, seq: Sequence) -> bool:
+    def can_append(self, seq: Sequence) -> bool:   # 只有当seq长度刚好为block_size+1的时候, 需要新的block, return true, 其他都不需要
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)
+        # needs_new_block = (len(seq) % self.block_size == 1)
+        # required_blocks = 1 if needs_new_block else 0
+        # return len(self.free_block_ids) >= required_blocks
 
-    def may_append(self, seq: Sequence):
+    def may_append(self, seq: Sequence):    # 如果多了一个token, 分配一块新的block, 如果刚好满了, 计算hash
         block_table = seq.block_table
         last_block = self.blocks[block_table[-1]]
         if len(seq) % self.block_size == 1:
