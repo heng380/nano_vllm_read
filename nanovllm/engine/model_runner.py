@@ -209,7 +209,7 @@ class ModelRunner:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)   # 实际计算, 返回词表维度的logits
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None   # 进行温度采样
+        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None   # 进行温度采样.
         reset_context()
         return token_ids
 
