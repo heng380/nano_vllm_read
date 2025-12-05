@@ -23,16 +23,16 @@ class ModelRunner:
         self.rank = rank
         self.event = event
 
-        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)
+        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)   # 多机通信
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)
         torch.set_default_device("cuda")
-        self.model = Qwen3ForCausalLM(hf_config)
-        load_model(self.model, config.model)
+        self.model = Qwen3ForCausalLM(hf_config)   # 模型结构加载
+        load_model(self.model, config.model)   # 初始化模型权重
         self.sampler = Sampler()
-        self.warmup_model()
-        self.allocate_kv_cache()
+        self.warmup_model()    # 空跑一边
+        self.allocate_kv_cache()    
         if not self.enforce_eager:
             self.capture_cudagraph()
         torch.set_default_device("cpu")
@@ -161,7 +161,7 @@ class ModelRunner:
         set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
         return input_ids, positions
 
-    def prepare_decode(self, seqs: list[Sequence]):
+    def prepare_decode(self, seqs: list[Sequence]):  # flash attention相关
         input_ids = []
         positions = []
         slot_mapping = []
@@ -176,7 +176,7 @@ class ModelRunner:
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         block_tables = self.prepare_block_tables(seqs)
-        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
+        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)   # 设置flash atten相关的变量
         return input_ids, positions
 
     def prepare_sample(self, seqs: list[Sequence]):
@@ -208,8 +208,8 @@ class ModelRunner:
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
-        logits = self.run_model(input_ids, positions, is_prefill)
-        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None
+        logits = self.run_model(input_ids, positions, is_prefill)   # 实际计算, 返回词表维度的logits
+        token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None   # 进行温度采样
         reset_context()
         return token_ids
 

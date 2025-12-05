@@ -90,7 +90,7 @@ class BlockManager:
         seq.num_cached_tokens = 0
         seq.block_table.clear()
 
-    def can_append(self, seq: Sequence) -> bool:   # 只有当seq长度刚好为block_size+1的时候, 需要新的block, return true, 其他都不需要
+    def can_append(self, seq: Sequence) -> bool:   # 只有当seq长度刚好为block_size+1的时候, 需要新的block, return true, 其他都不需要; 只有当len free blocks==0, 并且需要新开一个block的时候才是true
         return len(self.free_block_ids) >= (len(seq) % self.block_size == 1)
         # needs_new_block = (len(seq) % self.block_size == 1)
         # required_blocks = 1 if needs_new_block else 0
