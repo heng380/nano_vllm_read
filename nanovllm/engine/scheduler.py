@@ -11,7 +11,7 @@ class Scheduler:
         self.max_num_seqs = config.max_num_seqs
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
-        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)   # 初始化block队列
+        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)   # 初始化block队列, size 是 256, block 是-1 也就是自动计算, 在上面计算过了
         self.waiting: deque[Sequence] = deque()    # wait 队列
         self.running: deque[Sequence] = deque()    # running 队列
 
