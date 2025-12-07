@@ -32,13 +32,13 @@ class VocabParallelEmbedding(nn.Module):
         param_data.copy_(loaded_weight)
 
     def forward(self, x: torch.Tensor):
-        if self.tp_size > 1:
+        if self.tp_size > 1:   # 多 gpu
             mask = (x >= self.vocab_start_idx) & (x < self.vocab_end_idx)
             x = mask * (x - self.vocab_start_idx)
-        y = F.embedding(x, self.weight)
+        y = F.embedding(x, self.weight)  # 单gpu 直接返回
         if self.tp_size > 1:
             y = mask.unsqueeze(1) * y
-            dist.all_reduce(y)
+            dist.all_reduce(y)     # 每个gpu 找到自己那部分维护的 token embedding, 然后加起来得到完整的 seq embedding
         return y
 
 
@@ -59,8 +59,8 @@ class ParallelLMHead(VocabParallelEmbedding):
             last_indices = context.cu_seqlens_q[1:] - 1
             x = x[last_indices].contiguous()
         logits = F.linear(x, self.weight)
-        if self.tp_size > 1:
-            all_logits = [torch.empty_like(logits) for _ in range(self.tp_size)] if self.tp_rank == 0 else None
-            dist.gather(logits, all_logits, 0)
-            logits = torch.cat(all_logits, -1) if self.tp_rank == 0 else None
+        if self.tp_size > 1: # 每个权重矩阵是 15w/4*1024, 所以需要拼起来
+            all_logits = [torch.empty_like(logits) for _ in range(self.tp_size)] if self.tp_rank == 0 else None # 0 号 gpu 分配显存
+            dist.gather(logits, all_logits, 0) # 规约到 0 号
+            logits = torch.cat(all_logits, -1) if self.tp_rank == 0 else None # 拼起来
         return logits

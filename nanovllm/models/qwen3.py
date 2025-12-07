@@ -110,9 +110,9 @@ class Qwen3MLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        gate_up = self.gate_up_proj(x)
-        x = self.act_fn(gate_up)
-        x = self.down_proj(x)
+        gate_up = self.gate_up_proj(x)    # 先列并行
+        x = self.act_fn(gate_up)     # gou 内部计算
+        x = self.down_proj(x)     # 行并行然后 all reduce
         return x
 
 
@@ -139,7 +139,7 @@ class Qwen3DecoderLayer(nn.Module):
             intermediate_size=config.intermediate_size,
             hidden_act=config.hidden_act,
         )
-        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
+        self.input_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps) 
         self.post_attention_layernorm = RMSNorm(config.hidden_size, eps=config.rms_norm_eps)
 
     def forward(
@@ -153,7 +153,7 @@ class Qwen3DecoderLayer(nn.Module):
         else:
             hidden_states, residual = self.input_layernorm(hidden_states, residual)
         hidden_states = self.self_attn(positions, hidden_states)
-        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual)
+        hidden_states, residual = self.post_attention_layernorm(hidden_states, residual) # 这个 rms norm 会返回两个值, 一个是 x+res作为 res, 一个是RMS(x+res)作为 mlp/att 的输入, 相当于融合了 add 和 rms 两个 kernel
         hidden_states = self.mlp(hidden_states)
         return hidden_states, residual
 

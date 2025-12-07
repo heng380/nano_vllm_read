@@ -30,7 +30,7 @@ class ModelRunner:
         torch.set_default_device("cuda")
         self.model = Qwen3ForCausalLM(hf_config)   # 模型结构加载
         load_model(self.model, config.model)   # 初始化模型权重
-        self.sampler = Sampler()
+        self.sampler = Sampler()   
         self.warmup_model()    # 空跑一边
         self.allocate_kv_cache()    
         if not self.enforce_eager:
@@ -92,9 +92,9 @@ class ModelRunner:
         torch.cuda.empty_cache()
         torch.cuda.reset_peak_memory_stats()
         max_num_batched_tokens, max_model_len = self.config.max_num_batched_tokens, self.config.max_model_len
-        num_seqs = min(max_num_batched_tokens // max_model_len, self.config.max_num_seqs)
+        num_seqs = min(max_num_batched_tokens // max_model_len, self.config.max_num_seqs)   # 计算双重约束下的最大并发 seq 数量, min(4, 512)
         seqs = [Sequence([0] * max_model_len) for _ in range(num_seqs)]
-        self.run(seqs, True)
+        self.run(seqs, True)    # 只跑一次 prefill
         torch.cuda.empty_cache()
 
     def allocate_kv_cache(self):
@@ -102,19 +102,19 @@ class ModelRunner:
         hf_config = config.hf_config
         free, total = torch.cuda.mem_get_info()
         used = total - free
-        peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]
+        peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]   # prefill 阶段最大值
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
-        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize
-        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
+        block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize  # 单个 block 需要的内存量, 8 个 head(考虑 tp), 一个 head 是 128 维
+        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes   # used 为模型没有计算的时候的静态内存消耗, 比如模型权重, peak-current 是指进程拉满并发的情况下, 所产生的额外内存开销
         assert config.num_kvcache_blocks > 0
-        self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
+        self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)   # 把 kvcahe 的内存预留出来, 并把 shape 先设置好
         layer_id = 0
         for module in self.model.modules():
-            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):
+            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 只有 attention 有 kv cache
                 module.k_cache = self.kv_cache[0, layer_id]
-                module.v_cache = self.kv_cache[1, layer_id]
+                module.v_cache = self.kv_cache[1, layer_id]  # 对应 2, 初始化attention 类中的 k_cache 和 v_cache
                 layer_id += 1
 
     def prepare_block_tables(self, seqs: list[Sequence]):
