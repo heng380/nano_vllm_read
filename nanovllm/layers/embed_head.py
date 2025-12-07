@@ -6,7 +6,7 @@ import torch.distributed as dist
 from nanovllm.utils.context import get_context
 
 
-class VocabParallelEmbedding(nn.Module):
+class VocabParallelEmbedding(nn.Module):   # tp一般是列并行优先的, 但是查表这个操作比较轻, 行并行比较好, 一个 gpu 查一部分
 
     def __init__(
         self,

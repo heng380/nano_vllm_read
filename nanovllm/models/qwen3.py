@@ -74,16 +74,16 @@ class Qwen3Attention(nn.Module):
         hidden_states: torch.Tensor,
     ) -> torch.Tensor:
         qkv = self.qkv_proj(hidden_states)
-        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
-        q = q.view(-1, self.num_heads, self.head_dim)
+        q, k, v = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1) # 分成 3 部分
+        q = q.view(-1, self.num_heads, self.head_dim)   # q 拆成 16*128
         k = k.view(-1, self.num_kv_heads, self.head_dim)
-        v = v.view(-1, self.num_kv_heads, self.head_dim)
+        v = v.view(-1, self.num_kv_heads, self.head_dim)  # k,v 拆成 8*128
         if not self.qkv_bias:
-            q = self.q_norm(q)
-            k = self.k_norm(k)
+            q = self.q_norm(q)  
+            k = self.k_norm(k)  # qk rms norm
         q, k = self.rotary_emb(positions, q, k)
         o = self.attn(q, k, v)
-        output = self.o_proj(o.flatten(1, -1))
+        output = self.o_proj(o.flatten(1, -1))   # 行并行, 归约
         return output
 
 

@@ -104,7 +104,7 @@ class ModelRunner:
         used = total - free
         peak = torch.cuda.memory_stats()["allocated_bytes.all.peak"]   # prefill 阶段最大值
         current = torch.cuda.memory_stats()["allocated_bytes.all.current"]
-        num_kv_heads = hf_config.num_key_value_heads // self.world_size
+        num_kv_heads = hf_config.num_key_value_heads // self.world_size  # 每个 gpu 只负责自己的那部分 head 的计算
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.torch_dtype.itemsize  # 单个 block 需要的内存量, 8 个 head(考虑 tp), 一个 head 是 128 维
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes   # used 为模型没有计算的时候的静态内存消耗, 比如模型权重, peak-current 是指进程拉满并发的情况下, 所产生的额外内存开销
@@ -134,11 +134,11 @@ class ModelRunner:
         block_tables = None
         for seq in seqs:
             seqlen = len(seq)
-            input_ids.extend(seq[seq.num_cached_tokens:])
-            positions.extend(list(range(seq.num_cached_tokens, seqlen)))
-            seqlen_q = seqlen - seq.num_cached_tokens
+            input_ids.extend(seq[seq.num_cached_tokens:])   # 将所有 seq 合并为一维向量
+            positions.extend(list(range(seq.num_cached_tokens, seqlen)))   # 将所有 pos 合并为一维向量
+            seqlen_q = seqlen - seq.num_cached_tokens    
             seqlen_k = seqlen
-            cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
+            cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)   # 边界感知
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
