@@ -32,9 +32,9 @@ class ModelRunner:
         load_model(self.model, config.model)   # 初始化模型权重
         self.sampler = Sampler()   
         self.warmup_model()    # 空跑一边
-        self.allocate_kv_cache()    
-        if not self.enforce_eager:
-            self.capture_cudagraph()
+        self.allocate_kv_cache()    # 分配给 kv cache 的内存
+        if not self.enforce_eager:     # 开启 cuda graph
+            self.capture_cudagraph()    # 只对 decode 生效
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
 
@@ -112,7 +112,7 @@ class ModelRunner:
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)   # 把 kvcahe 的内存预留出来, 并把 shape 先设置好
         layer_id = 0
         for module in self.model.modules():
-            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 只有 attention 有 kv cache
+            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 绑定内存, 只有 attention 有 kv cache
                 module.k_cache = self.kv_cache[0, layer_id]
                 module.v_cache = self.kv_cache[1, layer_id]  # 对应 2, 初始化attention 类中的 k_cache 和 v_cache
                 layer_id += 1
@@ -214,34 +214,38 @@ class ModelRunner:
         return token_ids
 
     @torch.inference_mode()
-    def capture_cudagraph(self):
+    def capture_cudagraph(self):    # 消除 cpu launch kernel 的时间消耗, 通过重放计算图去掉这部分消耗
         config = self.config
         hf_config = config.hf_config
         max_bs = min(self.config.max_num_seqs, 512)
-        max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
+        max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size   # 一个句子的最大 block 数量, 向上取整
         input_ids = torch.zeros(max_bs, dtype=torch.int64)
-        positions = torch.zeros(max_bs, dtype=torch.int64)
+        positions = torch.zeros(max_bs, dtype=torch.int64)    # seq 个数, 默认最大
         slot_mapping = torch.zeros(max_bs, dtype=torch.int32)
         context_lens = torch.zeros(max_bs, dtype=torch.int32)
         block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32)
         outputs = torch.zeros(max_bs, hf_config.hidden_size)
-        self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))
-        self.graphs = {}
+        self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))   # 定义多个 batch size, 找最接近的
+        self.graphs = {}   # 不同 bs 对应的 cudagraph 实例
         self.graph_pool = None
 
         for bs in reversed(self.graph_bs):
             graph = torch.cuda.CUDAGraph()
-            set_context(False, slot_mapping=slot_mapping[:bs], context_lens=context_lens[:bs], block_tables=block_tables[:bs])
+            set_context(False,    # decode
+                slot_mapping=slot_mapping[:bs], 
+                context_lens=context_lens[:bs], 
+                block_tables=block_tables[:bs]
+            )
             outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # warmup
             with torch.cuda.graph(graph, self.graph_pool):
-                outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # capture
+                outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # capture, 捕获 kernel 的执行顺序和参数等计算图
             if self.graph_pool is None:
-                self.graph_pool = graph.pool()
+                self.graph_pool = graph.pool()    # 专用内存池用于kernel/activation等
             self.graphs[bs] = graph
             torch.cuda.synchronize()
             reset_context()
 
-        self.graph_vars = dict(
+        self.graph_vars = dict(    # 一组 placeholder, 用于预分配输入
             input_ids=input_ids,
             positions=positions,
             slot_mapping=slot_mapping,
