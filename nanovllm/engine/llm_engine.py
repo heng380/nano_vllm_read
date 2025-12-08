@@ -42,7 +42,7 @@ class LLMEngine:
     def add_request(self, prompt: str | list[int], sampling_params: SamplingParams):
         if isinstance(prompt, str):    # 传入string, 进行encoder
             prompt = self.tokenizer.encode(prompt)
-        seq = Sequence(prompt, sampling_params)     
+        seq = Sequence(prompt, sampling_params)
         self.scheduler.add(seq)
 
     def step(self):
@@ -54,7 +54,7 @@ class LLMEngine:
         return outputs, num_tokens
 
     def is_finished(self):
-        return self.scheduler.is_finished()
+        return self.scheduler.is_finished() # return not self.waiting and not self.running
 
     def generate(
         self,

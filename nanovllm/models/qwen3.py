@@ -39,7 +39,7 @@ class Qwen3Attention(nn.Module):
         self.scaling = self.head_dim ** -0.5
         self.qkv_bias = qkv_bias
 
-        self.qkv_proj = QKVParallelLinear(
+        self.qkv_proj = QKVParallelLinear(    # 列并行
             hidden_size,
             self.head_dim,
             self.total_num_heads,
@@ -110,8 +110,8 @@ class Qwen3MLP(nn.Module):
         self.act_fn = SiluAndMul()
 
     def forward(self, x):
-        gate_up = self.gate_up_proj(x)    # 先列并行
-        x = self.act_fn(gate_up)     # gou 内部计算
+        gate_up = self.gate_up_proj(x)    # 先列并行将W1和W2分割之后拼接和x进行乘法
+        x = self.act_fn(gate_up)     # gpu 内部计算, 前一半进行silu, 后一半不变
         x = self.down_proj(x)     # 行并行然后 all reduce
         return x
 

@@ -134,8 +134,8 @@ class ModelRunner:
         block_tables = None
         for seq in seqs:
             seqlen = len(seq)
-            input_ids.extend(seq[seq.num_cached_tokens:])   # 将所有 seq 合并为一维向量
-            positions.extend(list(range(seq.num_cached_tokens, seqlen)))   # 将所有 pos 合并为一维向量
+            input_ids.extend(seq[seq.num_cached_tokens:])   # 将所有 seq 合并为一维向量, 去除缓存
+            positions.extend(list(range(seq.num_cached_tokens, seqlen)))   # 将所有 pos 合并为一维向量, 和input_ids一一对应
             seqlen_q = seqlen - seq.num_cached_tokens    
             seqlen_k = seqlen
             cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)   # 边界感知
@@ -167,7 +167,7 @@ class ModelRunner:
         slot_mapping = []
         context_lens = []
         for seq in seqs:
-            input_ids.append(seq.last_token)
+            input_ids.append(seq.last_token)    # 最后一个token
             positions.append(len(seq) - 1)
             context_lens.append(len(seq))
             slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)

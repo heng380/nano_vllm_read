@@ -60,14 +60,14 @@ class BlockManager:
         assert not seq.block_table     # 尚未分配block
         h = -1
         cache_miss = False
-        for i in range(seq.num_blocks):    # num_blocks是token长度除以block_size + 1, 向上取整
-            token_ids = seq.block(i)
+        for i in range(seq.num_blocks):    # num_blocks是token长度除以block_size + 1, 向上取整, (self.num_tokens + self.block_size - 1) // self.block_size
+            token_ids = seq.block(i)    # 返回256个token
             h = self.compute_hash(token_ids, h) if len(token_ids) == self.block_size else -1   # 对满的block计算hash
-            block_id = self.hash_to_block_id.get(h, -1)
+            block_id = self.hash_to_block_id.get(h, -1)  # 如果这个seq的block已经有过kv cache缓存
             if block_id == -1 or self.blocks[block_id].token_ids != token_ids:  # cache miss
                 cache_miss = True
             if cache_miss:    # 一个cache miss之后, 后面的就算一样也当作cache miss来处理
-                block_id = self.free_block_ids[0]
+                block_id = self.free_block_ids[0]    # 吐一个空的block出来
                 block = self._allocate_block(block_id)
             else:    # cache找到了
                 seq.num_cached_tokens += self.block_size   # 计数总共的cached的token
@@ -77,8 +77,8 @@ class BlockManager:
                 else:
                     block = self._allocate_block(block_id)    # 分配一块新的内存
             if h != -1:     # block是满的
-                block.update(h, token_ids)
-                self.hash_to_block_id[h] = block_id
+                block.update(h, token_ids)   # 装进去
+                self.hash_to_block_id[h] = block_id  # 更新hash_to_block_id
             seq.block_table.append(block_id)
 
     def deallocate(self, seq: Sequence):    # 后面的block更容易是特有的, 所以先检查, 先释放

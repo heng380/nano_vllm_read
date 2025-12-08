@@ -112,10 +112,10 @@ class QKVParallelLinear(ColumnParallelLinear):
         super().__init__(hidden_size, output_size, bias)
 
     def weight_loader(self, param: nn.Parameter, loaded_weight: torch.Tensor, loaded_shard_id: str):
-        param_data = param.data
-        assert loaded_shard_id in ["q", "k", "v"]
+        param_data = param.data   # qkv_proj.weight
+        assert loaded_shard_id in ["q", "k", "v"]     # 映射
         if loaded_shard_id == "q":
-            shard_size = self.num_heads * self.head_size
+            shard_size = self.num_heads * self.head_size    # 16个头
             shard_offset = 0
         elif loaded_shard_id == "k":
             shard_size = self.num_kv_heads * self.head_size
@@ -125,7 +125,7 @@ class QKVParallelLinear(ColumnParallelLinear):
             shard_offset = self.num_heads * self.head_size + self.num_kv_heads * self.head_size
         param_data = param_data.narrow(self.tp_dim, shard_offset, shard_size)
         loaded_weight = loaded_weight.chunk(self.tp_size, self.tp_dim)[self.tp_rank]
-        param_data.copy_(loaded_weight)
+        param_data.copy_(loaded_weight)    # 将qkv矩阵合成为1个, 列并行到每一个gpu上面
 
 
 class RowParallelLinear(LinearBase):
