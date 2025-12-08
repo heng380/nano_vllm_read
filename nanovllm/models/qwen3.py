@@ -82,8 +82,8 @@ class Qwen3Attention(nn.Module):
             q = self.q_norm(q)  
             k = self.k_norm(k)  # qk rms norm
         q, k = self.rotary_emb(positions, q, k)
-        o = self.attn(q, k, v)
-        output = self.o_proj(o.flatten(1, -1))   # 行并行, 归约
+        o = self.attn(q, k, v)   # 这里要flash attention计算, 会用到前面铺垫很久的block
+        output = self.o_proj(o.flatten(1, -1))   # 行并行, 归约, 类似
         return output
 
 
