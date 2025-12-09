@@ -23,7 +23,7 @@ class ModelRunner:
         self.rank = rank
         self.event = event
 
-        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)   # 多机通信
+        dist.init_process_group("nccl", "tcp://localhost:2333", world_size=self.world_size, rank=rank)   # 多卡通信, world_size 为 tp 规模
         torch.cuda.set_device(rank)
         default_dtype = torch.get_default_dtype()
         torch.set_default_dtype(hf_config.torch_dtype)
@@ -39,12 +39,12 @@ class ModelRunner:
         torch.set_default_dtype(default_dtype)
 
         if self.world_size > 1:
-            if rank == 0:
-                self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)
+            if rank == 0:     # 主进程
+                self.shm = SharedMemory(name="nanovllm", create=True, size=2**20)   
                 dist.barrier()
             else:
-                dist.barrier()
-                self.shm = SharedMemory(name="nanovllm")
+                dist.barrier()     # 等待主进程到达barrier, 创建内存成功
+                self.shm = SharedMemory(name="nanovllm") # 连接 共享cpu内存
                 self.loop()
 
     def exit(self):
@@ -60,20 +60,20 @@ class ModelRunner:
 
     def loop(self):
         while True:
-            method_name, args = self.read_shm()
-            self.call(method_name, *args)
+            method_name, args = self.read_shm()   # 如果有它要做的任务的话
+            self.call(method_name, *args)       # call函数
             if method_name == "exit":
                 break
 
-    def read_shm(self):
+    def read_shm(self):         # 阻塞自己, 等待任务到来
         assert self.world_size > 1 and self.rank > 0
         self.event.wait()
         n = int.from_bytes(self.shm.buf[0:4], "little")
         method_name, *args = pickle.loads(self.shm.buf[4:n+4])
-        self.event.clear()
+        self.event.clear()  # clear 标志位
         return method_name, args
 
-    def write_shm(self, method_name, *args):
+    def write_shm(self, method_name, *args):     # 分发任务
         assert self.world_size > 1 and self.rank == 0
         data = pickle.dumps([method_name, *args])
         n = len(data)
@@ -82,9 +82,9 @@ class ModelRunner:
         for event in self.event:
             event.set()
 
-    def call(self, method_name, *args):
+    def call(self, method_name, *args):     # step中call run函数
         if self.world_size > 1 and self.rank == 0:
-            self.write_shm(method_name, *args)
+            self.write_shm(method_name, *args)   # 主进程给子进程分发任务, 子进程直接进入下面的方法执行
         method = getattr(self, method_name, None)
         return method(*args)
 
@@ -188,12 +188,12 @@ class ModelRunner:
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
-        if is_prefill or self.enforce_eager or input_ids.size(0) > 512:
+        if is_prefill or self.enforce_eager or input_ids.size(0) > 512:  # 最大捕获到 512
             return self.model.compute_logits(self.model(input_ids, positions))
         else:
-            bs = input_ids.size(0)
+            bs = input_ids.size(0)    # decode 阶段形状为[batch_size, ], 只需要最后一个 token 就可以了
             context = get_context()
-            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
+            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]  # 找到最接近的图
             graph_vars = self.graph_vars
             graph_vars["input_ids"][:bs] = input_ids
             graph_vars["positions"][:bs] = positions
@@ -202,8 +202,8 @@ class ModelRunner:
             graph_vars["context_lens"].zero_()
             graph_vars["context_lens"][:bs] = context.context_lens
             graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
-            graph.replay()
-            return self.model.compute_logits(graph_vars["outputs"][:bs])
+            graph.replay()   # 直接回放
+            return self.model.compute_logits(graph_vars["outputs"][:bs])   # 直接拿出来
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
@@ -214,7 +214,7 @@ class ModelRunner:
         return token_ids
 
     @torch.inference_mode()
-    def capture_cudagraph(self):    # 消除 cpu launch kernel 的时间消耗, 通过重放计算图去掉这部分消耗
+    def capture_cudagraph(self):    # 消除 cpu launch kernel 的时间消耗, 通过重放计算图去掉这部分消耗, cpu 一次性发射所有 kernel
         config = self.config
         hf_config = config.hf_config
         max_bs = min(self.config.max_num_seqs, 512)

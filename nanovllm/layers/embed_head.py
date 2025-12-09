@@ -42,7 +42,7 @@ class VocabParallelEmbedding(nn.Module):   # tp一般是列并行优先的, 但�
         return y
 
 
-class ParallelLMHead(VocabParallelEmbedding):
+class ParallelLMHead(VocabParallelEmbedding):   # 列并行
 
     def __init__(
         self,
@@ -58,9 +58,9 @@ class ParallelLMHead(VocabParallelEmbedding):
         if context.is_prefill:
             last_indices = context.cu_seqlens_q[1:] - 1
             x = x[last_indices].contiguous()
-        logits = F.linear(x, self.weight)
+        logits = F.linear(x, self.weight)   # weight: [15w/4, 1024], x: [b, 1024] -> [b, 15w/4]
         if self.tp_size > 1: # 每个权重矩阵是 15w/4*1024, 所以需要拼起来
             all_logits = [torch.empty_like(logits) for _ in range(self.tp_size)] if self.tp_rank == 0 else None # 0 号 gpu 分配显存
-            dist.gather(logits, all_logits, 0) # 规约到 0 号
+            dist.gather(logits, all_logits, 0) # 收集到 0 号
             logits = torch.cat(all_logits, -1) if self.tp_rank == 0 else None # 拼起来
         return logits
