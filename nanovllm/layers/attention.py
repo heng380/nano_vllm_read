@@ -37,7 +37,19 @@ def store_kvcache(key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor,
     assert key.stride(1) == head_dim and value.stride(1) == head_dim
     assert k_cache.stride(1) == D and v_cache.stride(1) == D
     assert slot_mapping.numel() == N
-    store_kvcache_kernel[(N,)](key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D)
+    store_kvcache_kernel[(N,)](key, key.stride(0), value, value.stride(0), k_cache, v_cache, slot_mapping, D)    #slot_mapping[i]的索引找到二维的block+offset, 放进head*dim的数据
+
+def store_kvcache_simplified(
+    key: torch.Tensor, value: torch.Tensor, k_cache: torch.Tensor, v_cache: torch.Tensor, slot_mapping: torch.Tensor
+):
+    N, num_heads, head_dim = key.shape
+    flat_key = key.view(N, -1)    # [N, num_heads * head_dim]
+    flat_value = value.view(N, -1)      # [N, num_heads * head_dim]
+
+    for i in range(N):
+        slot = slot_mapping[i].item()
+        k_cache[slot] = flat_key[i]
+        v_cache[slot] = flat_value[i]
 
 
 class Attention(nn.Module):
@@ -54,13 +66,13 @@ class Attention(nn.Module):
         self.head_dim = head_dim
         self.scale = scale
         self.num_kv_heads = num_kv_heads
-        self.k_cache = self.v_cache = torch.tensor([])
+        self.k_cache = self.v_cache = torch.tensor([])    # 初始化占位符, 在allocate_kvcache的时候分配了内存空间
 
     def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
         context = get_context()
-        k_cache, v_cache = self.k_cache, self.v_cache
+        k_cache, v_cache = self.k_cache, self.v_cache    # num_kvcache_blocks, 256, head, dim
         if k_cache.numel() and v_cache.numel():
-            store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)   # 存放 kv cache
+            store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)   # 存放 kv cache, slot_mapping是一个list, 存放每个seq中没有cache的尾部部分, 是全局内存索引
         if context.is_prefill:
             if context.block_tables is not None:    # prefix cache
                 k, v = k_cache, v_cache

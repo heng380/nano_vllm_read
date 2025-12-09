@@ -114,14 +114,14 @@ class ModelRunner:
         for module in self.model.modules():
             if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 绑定内存, 只有 attention 有 kv cache
                 module.k_cache = self.kv_cache[0, layer_id]
-                module.v_cache = self.kv_cache[1, layer_id]  # 对应 2, 初始化attention 类中的 k_cache 和 v_cache
+                module.v_cache = self.kv_cache[1, layer_id]  # 对应 2, 初始化attention 类中的 k_cache 和 v_cache, 每个是一个kv_blocks*256(size)*head*dim的张量
                 layer_id += 1
 
-    def prepare_block_tables(self, seqs: list[Sequence]):
+    def prepare_block_tables(self, seqs: list[Sequence]):   # 有prefix cache, 准备block tables
         max_len = max(len(seq.block_table) for seq in seqs)
         block_tables = [seq.block_table + [-1] * (max_len - len(seq.block_table)) for seq in seqs]
         block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        return block_tables
+        return block_tables     # 固定形状的block table   [[1,2,3,-1,-1], [1,2,4,5,6]]
 
     def prepare_prefill(self, seqs: list[Sequence]):
         input_ids = []
@@ -146,12 +146,12 @@ class ModelRunner:
                 continue
             for i in range(seq.num_cached_blocks, seq.num_blocks):
                 start = seq.block_table[i] * self.block_size
-                if i != seq.num_blocks - 1:
+                if i != seq.num_blocks - 1:                     # 最后一个可能没满
                     end = start + self.block_size
                 else:
                     end = start + seq.last_block_num_tokens 
-                slot_mapping.extend(list(range(start, end)))
-        if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache
+                slot_mapping.extend(list(range(start, end)))    # 没有被cache的token
+        if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # 存在 prefix cache, q和k不完全一致
             block_tables = self.prepare_block_tables(seqs)
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
@@ -167,10 +167,10 @@ class ModelRunner:
         slot_mapping = []
         context_lens = []
         for seq in seqs:
-            input_ids.append(seq.last_token)    # 最后一个token
+            input_ids.append(seq.last_token)        # 最后一个token
             positions.append(len(seq) - 1)
             context_lens.append(len(seq))
-            slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)
+            slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)     
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
