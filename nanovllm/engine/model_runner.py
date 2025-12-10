@@ -30,7 +30,7 @@ class ModelRunner:
         torch.set_default_device("cuda")
         self.model = Qwen3ForCausalLM(hf_config)   # 模型结构加载
         load_model(self.model, config.model)   # 初始化模型权重
-        self.sampler = Sampler()   
+        self.sampler = Sampler()   # 温度采样器
         self.warmup_model()    # 空跑一边
         self.allocate_kv_cache()    # 分配给 kv cache 的内存
         if not self.enforce_eager:     # 开启 cuda graph
@@ -110,12 +110,13 @@ class ModelRunner:
         config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes   # used 为模型没有计算的时候的静态内存消耗, 比如模型权重, peak-current 是指进程拉满并发的情况下, 所产生的额外内存开销
         assert config.num_kvcache_blocks > 0
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)   # 把 kvcahe 的内存预留出来, 并把 shape 先设置好
+        # config.num_kvcache_blocks, self.block_size slot_mapping 中记录的是这两个维度的
         layer_id = 0
         for module in self.model.modules():
-            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 绑定内存, 只有 attention 有 kv cache
+            if hasattr(module, "k_cache") and hasattr(module, "v_cache"):  # 绑定模型内存, 只有 attention 有 kv cache
                 module.k_cache = self.kv_cache[0, layer_id]
-                module.v_cache = self.kv_cache[1, layer_id]  # 对应 2, 初始化attention 类中的 k_cache 和 v_cache, 每个是一个kv_blocks*256(size)*head*dim的张量
-                layer_id += 1
+                module.v_cache = self.kv_cache[1, layer_id]  # attention 类中的 k_cache 和 v_cache, 每个是一个kv_blocks*256(size)*head*dim的张量
+                layer_id += 1                               # 虽然逻辑上是一个四维数组, 但是在 kernel 计算的时候当做一维数组处理, 通过 block_table* block_size+offset 获取前两个维度的索引, 直接拿回了 head*dim 的元素
 
     def prepare_block_tables(self, seqs: list[Sequence]):   # 有prefix cache, 准备block tables
         max_len = max(len(seq.block_table) for seq in seqs)
@@ -123,7 +124,7 @@ class ModelRunner:
         block_tables = torch.tensor(block_tables, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
         return block_tables     # 固定形状的block table   [[1,2,3,-1,-1], [1,2,4,5,6]]
 
-    def prepare_prefill(self, seqs: list[Sequence]):
+    def prepare_prefill(self, seqs: list[Sequence]):    # slot_mapping 只用于写入, 读取使用 block table 和
         input_ids = []
         positions = []
         cu_seqlens_q = [0]
@@ -206,7 +207,7 @@ class ModelRunner:
             return self.model.compute_logits(graph_vars["outputs"][:bs])   # 直接拿出来
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
-        input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
+        input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)  
         temperatures = self.prepare_sample(seqs) if self.rank == 0 else None
         logits = self.run_model(input_ids, positions, is_prefill)   # 实际计算, 返回词表维度的logits.
         token_ids = self.sampler(logits, temperatures).tolist() if self.rank == 0 else None   # 进行温度采样.
@@ -226,7 +227,7 @@ class ModelRunner:
         block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32)
         outputs = torch.zeros(max_bs, hf_config.hidden_size)
         self.graph_bs = [1, 2, 4, 8] + list(range(16, max_bs + 1, 16))   # 定义多个 batch size, 找最接近的
-        self.graphs = {}   # 不同 bs 对应的 cudagraph 实例
+        self.graphs = {}   # 不同 bs 对应的 cudagraph 对象
         self.graph_pool = None
 
         for bs in reversed(self.graph_bs):

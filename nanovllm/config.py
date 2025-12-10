@@ -6,7 +6,7 @@ from transformers import AutoConfig
 @dataclass
 class Config:
     model: str
-    max_num_batched_tokens: int = 16384
+    max_num_batched_tokens: int = 16384     # prefill中总的token数量, 不包括prefix cache的部分
     max_num_seqs: int = 512   # 并发处理的句子数量
     max_model_len: int = 4096    # 模型最长能处理的句子长度, 包含prompt和response
     gpu_memory_utilization: float = 0.9
@@ -15,7 +15,7 @@ class Config:
     hf_config: AutoConfig | None = None
     eos: int = -1
     kvcache_block_size: int = 256
-    num_kvcache_blocks: int = -1
+    num_kvcache_blocks: int = -1      # 总共的block块, 后面会自动计算
 
     def __post_init__(self):
         assert os.path.isdir(self.model)

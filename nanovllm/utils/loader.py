@@ -21,7 +21,7 @@ def load_model(model: nn.Module, path: str):
                         param_name = weight_name.replace(k, v)
                         param = model.get_parameter(param_name)
                         weight_loader = getattr(param, "weight_loader")
-                        weight_loader(param, f.get_tensor(weight_name), shard_id)
+                        weight_loader(param, f.get_tensor(weight_name), shard_id)     # 将q k v 三个weight合并到同一个qkv_proj中, 行合并
                         break
                 else:     # 不在需要特殊处理的 mapping 中
                     param = model.get_parameter(weight_name)

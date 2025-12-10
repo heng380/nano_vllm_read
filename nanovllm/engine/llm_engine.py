@@ -21,8 +21,8 @@ class LLMEngine:
         self.ps = []
         self.events = []
         ctx = mp.get_context("spawn")
-        for i in range(1, config.tensor_parallel_size):    # 初始化event对象  写入event句柄
-            event = ctx.Event()
+        for i in range(1, config.tensor_parallel_size):    # 初始化event对象
+            event = ctx.Event()      # 进程同步, 主进程会通过event.set通知子进程, 子进程通过event.wait等待任务
             process = ctx.Process(target=ModelRunner, args=(config, i, event))
             process.start()
             self.ps.append(process)
@@ -72,7 +72,7 @@ class LLMEngine:
         prefill_throughput = decode_throughput = 0.
         while not self.is_finished():   # waiting队列和running队列都空了的话, 是batch推理,先结束的并不会先返回
             t = perf_counter()
-            output, num_tokens = self.step()
+            output, num_tokens = self.step()   # key step 
             if use_tqdm:
                 if num_tokens > 0:
                     prefill_throughput = num_tokens / (perf_counter() - t)

@@ -5,7 +5,7 @@ import numpy as np
 from nanovllm.engine.sequence import Sequence
 
 
-class Block:    # 一个block就是一个定长seq
+class Block:    # 一个block就是一个定长seq, 是逻辑上的kv cache管理单元, 通过block table和slot_mapping来映射
 
     def __init__(self, block_id):
         self.block_id = block_id

@@ -68,13 +68,13 @@ class Attention(nn.Module):
         self.num_kv_heads = num_kv_heads
         self.k_cache = self.v_cache = torch.tensor([])    # 初始化占位符, 在allocate_kvcache的时候分配了内存空间
 
-    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor):  # prefill的qkv的维度是token_id, decode的qkv维度是batch_size
         context = get_context()
         k_cache, v_cache = self.k_cache, self.v_cache    # num_kvcache_blocks, 256, head, dim
         if k_cache.numel() and v_cache.numel():
-            store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)   # 存放 kv cache, slot_mapping是一个list, 存放每个seq中没有cache的尾部部分, 是全局内存索引
+            store_kvcache(k, v, k_cache, v_cache, context.slot_mapping)   # 存放 kv cache, slot_mapping是一个list, 存放每个seq中没有cache的尾部部分对应的kvcache的索引, 是全局内存索引
         if context.is_prefill:
-            if context.block_tables is not None:    # prefix cache
+            if context.block_tables is not None:    # prefix cache, 如果没有就走原生的kvcache
                 k, v = k_cache, v_cache
             o = flash_attn_varlen_func(q, k, v,
                                        max_seqlen_q=context.max_seqlen_q, cu_seqlens_q=context.cu_seqlens_q,
