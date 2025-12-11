@@ -29,7 +29,7 @@ class BlockManager:
         self.block_size = block_size     
         self.blocks: list[Block] = [Block(i) for i in range(num_blocks)]     # 所有block
         self.hash_to_block_id: dict[int, int] = dict()     # 通过hash值来定位是否已经存在相同的block
-        self.free_block_ids: deque[int] = deque(range(num_blocks))        # 双端队列
+        self.free_block_ids: deque[int] = deque(range(num_blocks))        # 双端队列, 从0-num_blocks
         self.used_block_ids: set[int] = set()     # set, 快速定位已经使用过的block
 
     @classmethod
