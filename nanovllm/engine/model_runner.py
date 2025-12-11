@@ -31,7 +31,7 @@ class ModelRunner:
         self.model = Qwen3ForCausalLM(hf_config)   # 模型结构加载
         load_model(self.model, config.model)   # 初始化模型权重
         self.sampler = Sampler()   # 温度采样器
-        self.warmup_model()    # 空跑一边
+        self.warmup_model()    # 空跑一遍
         self.allocate_kv_cache()    # 分配给 kv cache 的内存
         if not self.enforce_eager:     # 开启 cuda graph
             self.capture_cudagraph()    # 只对 decode 生效

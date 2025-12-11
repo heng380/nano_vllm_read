@@ -30,7 +30,7 @@ class LLMEngine:
         self.model_runner = ModelRunner(config, 0, self.events)    # 建立通信, 初始化模型, 建立共享内存池
         self.tokenizer = AutoTokenizer.from_pretrained(config.model, use_fast=True)
         config.eos = self.tokenizer.eos_token_id
-        self.scheduler = Scheduler(config)
+        self.scheduler = Scheduler(config)      # 初始化
         atexit.register(self.exit)
 
     def exit(self):
