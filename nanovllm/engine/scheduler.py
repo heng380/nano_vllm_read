@@ -43,7 +43,7 @@ class Scheduler:
         # decode
         while self.running and num_seqs < self.max_num_seqs:
             seq = self.running.popleft()
-            while not self.block_manager.can_append(seq):  # 如果free block用完了, 需要做empt
+            while not self.block_manager.can_append(seq):  # 如果free block用完了, 需要做抢占
                 if self.running:
                     self.preempt(self.running.pop())
                 else:
@@ -67,5 +67,5 @@ class Scheduler:
             seq.append_token(token_id)   # append各自seq的下一个token
             if (not seq.ignore_eos and token_id == self.eos) or seq.num_completion_tokens == seq.max_tokens:  # 到达response的最大生成长度 或者遇到了eos, 生成结束
                 seq.status = SequenceStatus.FINISHED
-                self.block_manager.deallocate(seq)
+                self.block_manager.deallocate(seq)     # 释放内存
                 self.running.remove(seq)
